@@ -1,0 +1,11 @@
+{
+  "name": "magpie-zcode-pool",
+  "version": "0.1.0",
+  "description": "magpie provider plugin: the ZCode account pool that zcode-switcher keeps on this computer, served as one provider that moves to the next account when a plan's quota runs out",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": "./index.mjs",
+  "files": ["index.mjs", "README.md"],
+  "keywords": ["magpie", "opencode", "opencode-plugin", "zcode", "glm", "bigmodel", "coding-plan", "account-pool"],
+  "license": "MIT"
+}
