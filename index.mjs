@@ -15,6 +15,11 @@
 //
 // The models are the GLM ones a coding plan serves: GLM-5.3, GLM-5.3-Flash,
 // GLM-5.2 and GLM-5-Turbo.
+//
+// The card of an account also says the resets it holds: the five hours' and
+// the week's, read from the vendor's own list, the same one magpie reads for
+// a GLM Coding plan of its own. Only read: a reset is spent on the vendor's
+// page (zcode-switcher does it), never from here.
 
 import { createDecipheriv, createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -291,8 +296,53 @@ async function vendorGet(url, key) {
   return env?.data ?? null;
 }
 
-// readQuota is the account's allowance: its plan, its windows, and how long
-// the plan is paid for.
+// whenOf is a time the vendor tells, as magpie's own resets read it: a
+// string in Beijing time, or a count of seconds (or of milliseconds, when it
+// is that big). It is an ISO time, or "" when the vendor told nothing.
+function whenOf(v) {
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+    const ms = v > 1e12 ? v : v * 1000;
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+  }
+  const t = beijing(v);
+  return t ? new Date(t).toISOString() : "";
+}
+
+// readResets is the resets the account's plan holds: the five hours' and the
+// week's, of which only those still available count (one that ran out stays
+// listed for a week, available false). It is the same list magpie reads for a
+// GLM Coding plan of its own (zcode_team.go), asked with the plan's key.
+async function readResets(account) {
+  const root = account.family === "zai" ? "https://api.z.ai" : "https://open.bigmodel.cn";
+  const data = await vendorGet(
+    `${root}/api/biz/customer-package-reset/list?targetType=PERSONAL`,
+    account.key,
+  );
+  const each = [];
+  let soonest = "";
+  const count = (list, window) => {
+    let n = 0;
+    for (const x of Array.isArray(list) ? list : []) {
+      if (x?.available !== true) continue;
+      n++;
+      const until = whenOf(x?.expireTime);
+      if (until && (!soonest || until < soonest)) soonest = until;
+      each.push({ until, window });
+    }
+    return n;
+  };
+  const fiveHour = count(data?.fiveHourResets, "fiveHour");
+  const weekly = count(data?.weekResets, "weekly");
+  const total = fiveHour + weekly;
+  // none is told as none: a card without a count is better than one that says
+  // zero resets are left
+  if (!total) return null;
+  return { count: total, byWindow: true, fiveHour, weekly, until: soonest, each };
+}
+
+// readQuota is the account's allowance: its plan, its windows, how long the
+// plan is paid for, and the resets it holds.
 async function readQuota(account) {
   const root = account.family === "zai" ? "https://api.z.ai" : "https://open.bigmodel.cn";
   const data = await vendorGet(`${root}/api/monitor/usage/quota/limit`, account.key);
@@ -305,6 +355,12 @@ async function readQuota(account) {
     Object.assign(out, term(subs));
   } catch {
     // the term is a nicety: a card without it still shows its windows
+  }
+  try {
+    const resets = await readResets(account);
+    if (resets) out.resets = resets;
+  } catch {
+    // the resets are a nicety too: a card without them still shows its windows
   }
   return out;
 }

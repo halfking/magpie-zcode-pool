@@ -72,6 +72,25 @@ zcode-pool · GLM Coding Max · renews Sep 12  · …XIcp  5h 4% (1259 / 28000) 
 
 实测：登录的是额度已 100% 的账号，请求照样 **200**（池里另一个账号接管）。
 
+### 4. 重置卡（只读）
+
+额度卡上还多一行 **↺ 重置次数**：这个账号手里还有几张能回满额度的卡。
+
+- 数据来自 `open.bigmodel.cn/api/biz/customer-package-reset/list?targetType=PERSONAL`，
+  与 magpie 核心读自己那份 GLM Coding 套餐用的是**同一个接口**（`zcode_team.go`），
+  所以插件的读数与原生 GLM Coding 卡片的口径一致。
+- 只数还可用（`available`）的：已过期的卡还会在列表里挂一周，按不可用剔除。
+- 分两档报：**5 小时重置** 与 **周重置** 各几张，并给出最早过期时间。
+- **只读**：卡在哪里用仍在 zcode-switcher 里做，本插件不去动卡。
+
+实测（本机 3 个账号）：
+
+```
+zcode-pool · GLM Coding Max · renews May 24 · 56****81@qq.com  ↺ 3 five-hour resets · 3 weekly resets until Wed 12:05
+zcode-pool · GLM Coding Lite · expires Dec 15 · pcwelcl0       ↺ 3 weekly resets until Dec 22 23:59
+zcode-pool · GLM Coding Max · renews Sep 12 · yrarnh58         ↺ 4 five-hour resets · 3 weekly resets until Wed 12:08
+```
+
 ## 装上
 
 ```sh
@@ -101,6 +120,8 @@ curl http://127.0.0.1:3425/v1/chat/completions \
    请求（请求体读一次、发多次）。
 4. **额度**：读额度时**串行 + 间隔 + 重试**——厂商在几个账号同时被问时会掐掉部分连接
    （socket closed），串行读并各重试 3 次才稳；读到的结果缓存 60 秒。
+5. **重置卡**：同一把计划 key 读厂商的重置卡列表，数还可用几张；读不到就不报，
+   不让这一项拖垮整张额度卡。
 
 ## 已知边界
 
@@ -112,6 +133,8 @@ curl http://127.0.0.1:3425/v1/chat/completions \
   两个插件并存：`zcode/*` 是官方单账号，`zcode-pool/*` 是本机账号池。
 - **账号池以 zcode-switcher 为准**：本插件只读不写它的目录。换账号、导入导出账号，
   仍在 zcode-switcher 里做。
+- **重置卡只读**：卡的数量与过期时间报上来，但**用卡**是 zcode-switcher 的动作
+  （`/api/biz/customer-package-reset/use` 会真的扣卡），本插件不代劳。
 
 ## 踩过的坑（留给下一个改这里的人）
 
