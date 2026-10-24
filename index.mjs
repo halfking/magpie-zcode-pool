@@ -130,6 +130,8 @@ function readPool() {
     out.push({
       id: String(profile.id ?? profile.name ?? ""),
       name: String(profile.name ?? profile.id ?? "ZCode"),
+      // the address the account gave, already masked by zcode-switcher
+      email: String(profile.email ?? ""),
       userId: String(profile.user_id ?? ""),
       family,
       key,
@@ -493,7 +495,7 @@ export async function MagpieZcodePoolPlugin({ client, magpie }) {
               options: readPool().map((a) => ({
                 label: a.name,
                 value: a.id,
-                hint: a.family === "zai" ? "z.ai" : "bigmodel",
+                hint: a.email || (a.family === "zai" ? "z.ai" : "bigmodel"),
               })),
             },
           ],
@@ -511,6 +513,10 @@ export async function MagpieZcodePoolPlugin({ client, magpie }) {
               type: "success",
               key: account.key,
               metadata: {
+                // magpie names an account by this (accountId, then the
+                // address under it), so the pool's own name is what the
+                // window shows, not the end of the key
+                email: account.email || account.name,
                 poolAccount: account.id,
                 name: account.name,
                 family: account.family,

@@ -33,6 +33,9 @@ magpie plugin login zcode-pool
 `provider#slot` 的账号位）。于是：
 
 - magpie 的账号页里能同时看到池里的多个账号，各自带自己的额度卡；
+- 账号在界面里**以池里的名字出现**（`yrarnh58`、`pcwelcl0`、账号自己的邮箱），
+  而不是一串 key 掩码——插件把名字写进 sign-in 的 `metadata.email`，magpie 就用它
+  当这个账号的身份；
 - 路由组可以按 `smart` / `usage` / `rotate` / `pace` 在它们之间挑（magpie 原生能力）；
 - 想换号，就再登录一次，选另一个。
 
