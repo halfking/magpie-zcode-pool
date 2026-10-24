@@ -41,6 +41,12 @@ magpie plugin login zcode-pool
 
 登录不需要粘贴 key：插件直接读本机账号池（`keyless`）。
 
+**删掉一个账号**（比如那个号已经废了）：
+
+- 界面上：那个账号卡片的「移除」——只删这一个（magpie 的单账号 sign-out）；
+- 命令行：`magpie plugin logout zcode-pool` 是**把该 provider 的账号全清空**，
+  不是删单个；要留到只剩一个号时用它更合适。
+
 ### 2. 用量 / 额度
 
 每个账号的额度由插件自己读（`auth.usage`），报给 magpie，于是 magpie 的
