@@ -20,8 +20,14 @@
 // the week's, read from the vendor's own list, the same one magpie reads for
 // a GLM Coding plan of its own. Only read: a reset is spent on the vendor's
 // page (zcode-switcher does it), never from here.
+//
+// And the gift the account holds (ZCode 1024 Dev Day, the Start Plan): its
+// buckets, what is used of each, and when each runs out. A gift is spent
+// with ZCode's own sign-in, never with a key, so it is spent in the ZCode
+// app — and zcode-switcher is what switches which account that app is on.
+// This plugin says how much each account holds; the spending is left there.
 
-import { createDecipheriv, createHash } from "node:crypto";
+import { createDecipheriv, createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, platform, userInfo } from "node:os";
 import { join } from "node:path";
@@ -102,6 +108,15 @@ function codingPlanKey(credentials) {
   return "";
 }
 
+// sessionToken is the account's ZCode session (its JWT), out of its
+// credentials. It is what a gift plan is read with: the gift is spent with
+// ZCode's own sign-in, never with a key.
+function sessionToken(credentials) {
+  if (!credentials || typeof credentials !== "object") return "";
+  const value = decrypt(credentials["zcodejwttoken"]);
+  return typeof value === "string" ? value.trim() : "";
+}
+
 // readPool is the accounts of the pool, each with the key it serves with.
 // A profile whose credentials are gone, or that has no coding-plan key, is
 // left out rather than breaking the whole pool.
@@ -140,6 +155,8 @@ function readPool() {
       userId: String(profile.user_id ?? ""),
       family,
       key,
+      // the account's ZCode session, for the gift plan it holds
+      jwt: sessionToken(credentials),
       base: family === "zai" ? ZAI_BASE : BIGMODEL_BASE,
     });
   }
@@ -341,8 +358,120 @@ async function readResets(account) {
   return { count: total, byWindow: true, fiveHour, weekly, until: soonest, each };
 }
 
+// ZCODE_BASE is ZCode's own site, where a gift plan is read and spent.
+const ZCODE_BASE = "https://zcode.z.ai";
+const ZCODE_APP_VERSION = "3.16.3"; // the ZCode whose gift list this reads
+
+// bucketModels are the models a gift bucket serves, as the vendor names
+// them ("model:glm-5.3" is glm-5.3).
+function bucketModels(bucket) {
+  return (Array.isArray(bucket?.capabilities) ? bucket.capabilities : [])
+    .map((c) => String(c ?? "").trim())
+    .filter((c) => c.startsWith("model:") || !c.includes(":"))
+    .map((c) => c.replace(/^model:/, "").trim())
+    .filter(Boolean);
+}
+
+// samePlan says a bucket belongs to a plan.
+function samePlan(bucket, plan) {
+  if (bucket?.user_plan_id && plan?.user_plan_id) {
+    return bucket.user_plan_id === plan.user_plan_id;
+  }
+  return String(bucket?.plan_id ?? "") === String(plan?.plan_id ?? "");
+}
+
+// giftOf is the gift plan the account holds (ZCode 1024 Dev Day, the Start
+// Plan): its buckets, what is left of each, and when each runs out. It is
+// read with the account's ZCode session, the way ZCode reads it.
+//
+// Only read: a gift is spent with ZCode's own sign-in (a key can never
+// spend one), so it is spent in the ZCode app, and zcode-switcher is what
+// switches which account that app is signed in as. This plugin says how
+// much each account holds, and leaves the spending to there.
+async function giftOf(account) {
+  const jwt = account.jwt;
+  if (!jwt) return null;
+  const res = await fetch(
+    `${ZCODE_BASE}/api/v1/zcode-plan/billing/balance?app_version=${ZCODE_APP_VERSION}`,
+    {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${jwt}`,
+        "User-Agent": `ZCode/${ZCODE_APP_VERSION}`,
+        "X-Device-Mid": randomUUID(),
+      },
+    },
+  );
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`.trim());
+  const env = await res.json();
+  const data = env?.data ?? null;
+  const now = Math.floor(Date.now() / 1000);
+  const plans = Array.isArray(data?.plans) ? data.plans : [];
+  const balances = Array.isArray(data?.balances) ? data.balances : [];
+  const buckets = [];
+  for (const plan of plans) {
+    if (String(plan?.status ?? "").toLowerCase() !== "active") continue;
+    const end = Number(plan?.ends_at ?? 0);
+    if (end > 0 && end <= now) continue;
+    const planName = String(plan?.name ?? "").trim();
+    for (const b of balances) {
+      if (!samePlan(b, plan)) continue;
+      const exp = Number(b?.expires_at ?? 0);
+      if (exp > 0 && exp <= now) continue;
+      const models = bucketModels(b);
+      if (!models.length) continue;
+      buckets.push({
+        plan: planName,
+        name: String(b?.show_name ?? models[0]),
+        models,
+        total: Number(b?.total_units ?? 0),
+        used: Number(b?.used_units ?? 0),
+        left: Number(b?.remaining_units ?? 0),
+        expiresAt: exp > 0 ? exp * 1000 : 0,
+      });
+    }
+  }
+  if (!buckets.length) return null;
+  return { name: buckets[0].plan || "Start Plan", buckets };
+}
+
+// giftWindows are the gift's buckets as magpie's windows: the model's name
+// as the picker spells it (with the trial suffix a gift's entry goes by),
+// what is used of the whole, and when the bucket runs out.
+function giftWindows(gift) {
+  const out = [];
+  const several = new Set(gift.buckets.map((b) => b.plan)).size > 1;
+  for (const b of gift.buckets) {
+    // a spent bucket is not left to spend
+    if (b.left <= 0) continue;
+    const used = b.total > 0 ? b.used : 0;
+    const pct = b.total > 0 ? (100 * used) / b.total : 0;
+    const models = [];
+    let name = b.name;
+    for (const m of b.models) {
+      const catalog = MODELS.find((x) => x.id.toLowerCase() === m.toLowerCase())?.id ?? m;
+      const trial = `${catalog}-Trial`;
+      models.push(catalog, trial);
+      const at = name.toLowerCase().indexOf(m.toLowerCase());
+      if (at >= 0) name = name.slice(0, at) + trial + name.slice(at + m.length);
+    }
+    const w = {
+      name: several && b.plan ? `${b.plan} · ${name}` : name,
+      used: pct,
+      amount: used,
+      limit: b.total,
+      display: `${compact(used)} / ${compact(b.total)}`,
+      models,
+    };
+    if (b.expiresAt) w.resetsAt = new Date(b.expiresAt).toISOString();
+    out.push(w);
+  }
+  return out;
+}
+
 // readQuota is the account's allowance: its plan, its windows, how long the
-// plan is paid for, and the resets it holds.
+// plan is paid for, the resets it holds, and the gift it holds.
 async function readQuota(account) {
   const root = account.family === "zai" ? "https://api.z.ai" : "https://open.bigmodel.cn";
   const data = await vendorGet(`${root}/api/monitor/usage/quota/limit`, account.key);
@@ -361,6 +490,13 @@ async function readQuota(account) {
     if (resets) out.resets = resets;
   } catch {
     // the resets are a nicety too: a card without them still shows its windows
+  }
+  try {
+    const gift = await giftOf(account);
+    const windows = gift ? giftWindows(gift) : [];
+    if (windows.length) out.windows = [...(out.windows ?? []), ...windows];
+  } catch {
+    // the gift is a nicety as well: a card without it still shows its windows
   }
   return out;
 }
@@ -612,6 +748,12 @@ export async function MagpieZcodePoolPlugin({ client, magpie }) {
         if (!account) return { error: "not signed in", signIn: "kept" };
         try {
           const card = await quotaOf(account);
+          // the gift's entries are told apart by the trial spelling, so the
+          // log says what the account holds and what is left of it
+          const gift = (card.windows ?? []).filter((w) => String(w.name).includes("-Trial"));
+          if (gift.length) {
+            log(`gift of ${account.name}: ${gift.map((w) => `${w.name} ${w.display}`).join(", ")}`);
+          }
           return { ...card, user: account.name, signIn: "kept" };
         } catch (e) {
           return { error: e?.message ?? String(e), user: account.name, signIn: "kept" };

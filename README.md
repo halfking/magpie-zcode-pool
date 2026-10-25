@@ -15,7 +15,7 @@ magpie 上游把 ZCode 内置迁到了社区插件（`@magpie-community/opencode
     `account-provider:coding-plan:account:<family>-individual-coding-plan:account:<id>:api-key`
     就是这个账号的 coding plan key
 
-## 三件事
+## 五件事
 
 ### 1. 换帐号登录
 
@@ -97,6 +97,32 @@ zcode-pool · GLM Coding Lite · expires Dec 15 · pcwelcl0       ↺ 3 weekly r
 zcode-pool · GLM Coding Max · renews Sep 12 · yrarnh58         ↺ 4 five-hour resets · 3 weekly resets until Wed 12:08
 ```
 
+### 5. 赠券（只读）
+
+额度卡上还有 **-Trial 的条目**：这个账号手里另有一份赠券额度（ZCode 1024 Dev Day / Start Plan），
+它和 coding plan 的 5 小时 / 周窗口是**两套**。
+
+- 数据来自 `zcode.z.ai/api/v1/zcode-plan/billing/balance`，用账号自己的 **ZCode 会话 JWT**
+  读（池里每个账号的凭据里都有 `zcodejwttoken`），和 ZCode 自己读它的方式一样。
+- 每个还在的桶（bucket）给一行：模型名用挑选器里的写法（`GLM-5.3-Trial`、`GLM-5.3-Flash-Trial`），
+  加上用了多少 / 一共多少，以及这个桶什么时候到期。
+- **已耗尽的桶不显示**（ciorf900 的 GLM-5.3 赠券就是 0，所以卡片上只有 Flash 那一条）。
+- **只读，而且刻意不在这里花**：赠券只认 **ZCode 的登录身份**，key 花不了它
+  （实测：拿普通 Anthropic 请求打赠券端点 → `405 / 3012 request has been blocked due to
+  unusual activity`，ZCode 只认「像它自己发出来的」请求）。
+  ⇒ 要花赠券，**在 zcode-switcher 里把 ZCode 切到那个账号**，官方
+  `@magpie-community/opencode-zcode-auth` 就会用它；本插件只负责告诉你每个账号还剩多少。
+
+实测（本机 3 个账号）：
+
+```
+zcode-pool · GLM Coding Max  · 56****81@qq.com  GLM-5.3-Flash-Trial 76% (227192507 / 300000000)
+zcode-pool · GLM Coding Lite · pcwelcl0         GLM-5.3-Flash-Trial 36% (108428769 / 300000000)
+                                               GLM-5.3-Trial        32% ( 64542106 / 200000000)
+zcode-pool · GLM Coding Max  · yrarnh58         GLM-5.3-Flash-Trial  9% ( 28409088 / 300000000)
+                                               GLM-5.3-Trial        95% (189653493 / 200000000)
+```
+
 ## 装上
 
 ```sh
@@ -128,6 +154,8 @@ curl http://127.0.0.1:3425/v1/chat/completions \
    （socket closed），串行读并各重试 3 次才稳；读到的结果缓存 60 秒。
 5. **重置卡**：同一把计划 key 读厂商的重置卡列表，数还可用几张；读不到就不报，
    不让这一项拖垮整张额度卡。
+6. **赠券**：用账号的 ZCode 会话 JWT（凭据里的 `zcodejwttoken`）读赠券余额，
+   把每个还在的桶变成一行 `-Trial` 窗口。读不到就不报，同样不拖累整张卡。
 
 ## 已知边界
 
@@ -141,6 +169,11 @@ curl http://127.0.0.1:3425/v1/chat/completions \
   仍在 zcode-switcher 里做。
 - **重置卡只读**：卡的数量与过期时间报上来，但**用卡**是 zcode-switcher 的动作
   （`/api/biz/customer-package-reset/use` 会真的扣卡），本插件不代劳。
+- **赠券只读，且不在这里花**：赠券（1024 Dev Day）只认 **ZCode 的登录身份**，
+  key 花不了它（实测普通 Anthropic 请求会被 `405 / 3012` 挡掉）。所以本插件
+  **不把 `-Trial` 模型放进可挑的模型表**——放了就是「能选但发不出去」。
+  要花赠券：在 **zcode-switcher 里把 ZCode 切到那个账号**，官方
+  `@magpie-community/opencode-zcode-auth` 就会用上它；本插件只负责报出每个账号还剩多少。
 
 ## 踩过的坑（留给下一个改这里的人）
 
